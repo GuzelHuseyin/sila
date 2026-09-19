@@ -1012,6 +1012,99 @@ p{margin:0}
 "use strict";
 
 /* ================================================================
+   ██  GOATCOUNTER — görünmez ziyaret takibi  ██
+   Kendi ziyaretlerimi saymamak için kendi telefonumda bir kez
+   https://guzelhuseyin.github.io/sila/#toggle-goatcounter adresini aç.
+   (Bir kere yeter; o tarayıcı bir daha sayılmaz. localhost zaten
+   hiç sayılmaz, yani bilgisayardaki testler istatistikleri bozmaz.)
+
+   Sayfada hiçbir sayac/yazı/rozet görünmez. Script engellenirse
+   (reklam engelleyici, uygulama içi tarayıcı, internet yoksa) site
+   %100 normal çalışır: her çağrı try/catch içinde ve sessizdir.
+   ================================================================ */
+const TRACK_SENT  = new Set();      /* her olay sayfa başına bir kez */
+const TRACK_QUEUE = [];             /* script henüz yüklenmediyse bekleyenler */
+const TRACK_STEP  = 500;            /* tekrar deneme aralığı (ms) */
+const TRACK_TRIES = 20;             /* 20 x 500ms = ~10s sonra vazgeç */
+let trackTimer = null, trackTicks = 0;
+
+/* konsola yazmak sadece testte / #gc-debug ile: canlı sitede sessiz */
+const TRACK_DEBUG = (function(){
+  try {
+    return /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) ||
+           location.hash.indexOf('gc-debug') > -1;
+  } catch(e){ return false; }
+})();
+
+function trackReady(){
+  try { return !!(window.goatcounter && window.goatcounter.count); } catch(e){ return false; }
+}
+
+/* kuyruğu boşalt; script hazır değilse hiçbir şey kaybolmaz */
+function trackFlush(){
+  try {
+    if (!TRACK_QUEUE.length) return true;
+    if (!trackReady()) return false;
+    while (TRACK_QUEUE.length){
+      const name = TRACK_QUEUE.shift();
+      try { window.goatcounter.count({ path:name, title:name, event:true }); } catch(e){}
+    }
+    return true;
+  } catch(e){ return true; }
+}
+
+function trackStopTimer(){
+  try { if (trackTimer){ clearInterval(trackTimer); trackTimer = null; } } catch(e){}
+}
+
+function trackRetry(){
+  try {
+    if (trackTimer) return;
+    trackTicks = 0;
+    trackTimer = setInterval(function(){
+      trackTicks++;
+      if (trackFlush() || trackTicks >= TRACK_TRIES){
+        trackStopTimer();
+        if (trackTicks >= TRACK_TRIES) TRACK_QUEUE.length = 0;   /* ~10s doldu, bırak */
+      }
+    }, TRACK_STEP);
+  } catch(e){}
+}
+
+/* tek güvenli kapı: hiçbir koşulda hata atmaz, UI'ı bekletmez.
+   always=true ise (örn. "tekrar öp") her seferinde gönderilir. */
+function track(name, always){
+  try {
+    if (!always){
+      if (TRACK_SENT.has(name)) return;
+      TRACK_SENT.add(name);
+    }
+    if (TRACK_DEBUG) try { console.log('[track] ' + name); } catch(e){}
+    TRACK_QUEUE.push(name);
+    if (!trackFlush()) trackRetry();
+  } catch(e){}
+}
+
+/* "anılar" bölümü gerçekten ekrana girdiğinde */
+function trackMemoriesWhenSeen(){
+  try {
+    if (!('IntersectionObserver' in window)) return;
+    const el = document.getElementById('memories');
+    if (!el) return;
+    const io = new IntersectionObserver(function(list){
+      for (let i = 0; i < list.length; i++){
+        if (list[i].isIntersecting){
+          track('10-anilar-goruldu');
+          try { io.disconnect(); } catch(e){}
+          return;
+        }
+      }
+    }, { threshold: 0, rootMargin: '0px 0px -20% 0px' });
+    io.observe(el);
+  } catch(e){}
+}
+
+/* ================================================================
    ██  CONFIG  ██
    Her şey burada. Değiştirmek istediğin yazıyı tırnakların
    arasından değiştir, dosyayı kaydet, bitti.
@@ -1758,6 +1851,7 @@ let envOpened = false;
 function openEnvelope(){
   if (envOpened) return;
   envOpened = true;
+  track('01-zarf-acildi');
   Sound.unlock();                       // iOS audio unlock happens on this very tap
   Sound.pop();
   vib(14);
@@ -1802,9 +1896,11 @@ onTap($('#apology-type'), function(){ if (apologyTyper) apologyTyper.skip(); });
 onTap($('#apology-hint'), function(){ if (apologyTyper) apologyTyper.skip(); });
 
 $('#btn-devam').addEventListener('click', function(){
+  track('02-ozur-okundu');
   $('#panel-apology').classList.remove('is-on');
   $('#panel-question').classList.add('is-on');
   questionOn = true;
+  track('03-soru-ekrani');
   Sound.pop();
 });
 
@@ -1900,6 +1996,8 @@ function escapeNo(px, py){
     const r = btnNo.getBoundingClientRect();
     FX.hearts(r.left + r.width / 2, r.top + r.height / 2, 3, .7);
     if (noCount >= 10) $('#softline').classList.add('on');
+    if (noCount >= 5)  track('04-hayir-kacti-5');
+    if (noCount >= 10) track('05-hayir-kacti-10');
   }
 }
 
@@ -1928,6 +2026,7 @@ document.addEventListener('pointermove', function(e){
 btnYes.addEventListener('click', function(){
   if (!questionOn) return;
   questionOn = false;
+  track('06-EVET');
   Sound.pop();
   vib(25);
   startKissScene();
@@ -2077,6 +2176,8 @@ function onKissTap(e){
   FX.setAmbient(Math.max(90, 700 - n * 62), 1 + n * 0.15);
 
   if (n === 1) $('#kiss-hint').style.opacity = '0';
+  if (n >= 5)  track('07-opucuk-5');
+  if (n >= 10) track('08-opucuk-10');
   if (n >= CONFIG.kissTotal){
     kissArmed = false;
     setTimeout(kissFinale, 560);
@@ -2211,6 +2312,7 @@ onTap($('#letter'), function(){ skipLetter(); });
 
 function finishLetter(){
   letterDone = true;
+  track('09-mektup-bitti');
   $('#letter-hint').classList.remove('on');
 
   const sign = $('#letter-sign');
@@ -2365,11 +2467,13 @@ setInterval(function(){
 const coupon = $('#coupon');
 onTap(coupon, function(){
   coupon.classList.toggle('flipped');
+  if (coupon.classList.contains('flipped')) track('11-kupon-cevrildi');
   Sound.pop();
   vib(12);
 });
 
 $('#btn-again').addEventListener('click', function(){
+  track('13-tekrar-opucuk', true);          /* her dokunuşta */
   resetKiss();
   go('kiss');
   FX.setAmbient(700, 1);
@@ -2497,6 +2601,20 @@ function boot(){
   wa.href = 'https://wa.me/' + CONFIG.whatsappNumber +
             '?text=' + encodeURIComponent(CONFIG.whatsappMessage);
 
+  /* önce olayı gönder, ~150ms sonra linki normal şekilde aç */
+  let waPass = false;
+  wa.addEventListener('click', function(e){
+    if (waPass){ waPass = false; return; }      /* ikinci tur: gerçek tıklama geçsin */
+    try { e.preventDefault(); } catch(err){}
+    track('12-whatsapp-tiklandi');
+    setTimeout(function(){
+      waPass = true;
+      try { wa.click(); } catch(err){ try { location.href = wa.href; } catch(e2){} }
+    }, 150);
+  });
+
+  trackMemoriesWhenSeen();
+
   buildFrog($('#frog-q'), 'normal');
   buildFrog($('#frog-end'), 'happy');
   buildCarousel();
@@ -2515,5 +2633,9 @@ else boot();
 
 })();
 </script>
+
+<!-- GoatCounter: görünmez, çerezsiz ziyaret sayımı. Sayfa görüntülemeleri
+     otomatik sayılır; engellenirse site aynen çalışır. -->
+<script data-goatcounter="https://silaicin.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
 </body>
 </html>
